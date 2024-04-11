@@ -1,10 +1,11 @@
 from fastapi import FastAPI, Request, HTTPException
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, StreamingResponse
 import os
-from cohere import Client, CohereError
+import cohere
+from cohere import CohereError
 
 app = FastAPI()
-client = Client(api_key=os.getenv("COHERE_API_KEY"))
+co = cohere.Client(api_key=os.getenv("COHERE_API_KEY"))
 
 @app.exception_handler(HTTPException)
 async def http_exception_handler(request: Request, exc: HTTPException):
@@ -16,20 +17,25 @@ async def cohere_exception_handler(request: Request, exc: CohereError):
 
 async def validate_request(request: Request):
     data = await request.json()
-    text = data.get("text")
-    if not text:
-        raise HTTPException(status_code=400, detail="テキストパラメーターが指定されていません")
-    return text
+    message = data.get("message")
+    if not message:
+        raise HTTPException(status_code=400, detail="messageパラメーターが指定されていません")
+    return data
 
-async def process_request(text: str):
+async def process_request(data: dict):
     try:
-        response = client.command_r_plus(text)
-        return response.results
+        data["model"] = "command-r-plus"  # Add this line to use command-r-plus model
+        if data.get("stream", False):
+            stream = co.chat_stream(**data)
+            return StreamingResponse(stream)
+        else:
+            response = co.chat(**data)
+            return JSONResponse(content=response)
     except CohereError as e:
         raise e
 
-@app.post("/command-r-plus")
-async def command_r_plus(request: Request):
-    text = await validate_request(request)
-    result = await process_request(text)
-    return JSONResponse(content=result)
+@app.post("/chat")
+async def chat(request: Request):
+    data = await validate_request(request)
+    result = await process_request(data)
+    return result
