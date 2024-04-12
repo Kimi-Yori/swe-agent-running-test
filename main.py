@@ -1,5 +1,5 @@
 from fastapi import FastAPI, HTTPException
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, StreamingResponse  # StreamingResponseをインポート
 from pydantic import BaseModel, ValidationError
 import os
 import cohere
@@ -13,7 +13,7 @@ class ChatRequest(BaseModel):
 
 api_key = os.getenv("COHERE_API_KEY")
 if not api_key:
-    raise EnvironmentError("COHERE_API_KEY is not set in environment variables")
+    raise EnvironmentError("COHERE_API_KEY is not set in environment variables. Please set it to continue.")
 co = cohere.Client(api_key=api_key)
 
 @app.exception_handler(HTTPException)
