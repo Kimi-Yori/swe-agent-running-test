@@ -1,41 +1,39 @@
-from fastapi import FastAPI, Request, HTTPException
-from fastapi.responses import JSONResponse, StreamingResponse
+from fastapi import FastAPI, HTTPException
+from fastapi.responses import JSONResponse
+from pydantic import BaseModel, ValidationError
 import os
 import cohere
 from cohere import CohereError
 
 app = FastAPI()
-co = cohere.Client(api_key=os.getenv("COHERE_API_KEY"))
+
+class ChatRequest(BaseModel):
+    message: str
+    stream: bool = False
+
+api_key = os.getenv("COHERE_API_KEY")
+if not api_key:
+    raise EnvironmentError("COHERE_API_KEY is not set in environment variables")
+co = cohere.Client(api_key=api_key)
 
 @app.exception_handler(HTTPException)
-async def http_exception_handler(request: Request, exc: HTTPException):
+async def http_exception_handler(request, exc: HTTPException):
     return JSONResponse(status_code=exc.status_code, content={"error": exc.detail})
 
 @app.exception_handler(CohereError)
-async def cohere_exception_handler(request: Request, exc: CohereError):
-    return JSONResponse(status_code=500, content={"error": "Cohere APIエラー"})
+async def cohere_exception_handler(request, exc: CohereError):
+    return JSONResponse(status_code=500, content={"error": "Cohere API error"})
 
-async def validate_request(request: Request):
-    data = await request.json()
-    message = data.get("message")
-    if not message:
-        raise HTTPException(status_code=400, detail="messageパラメーターが指定されていません")
-    return data
-
-async def process_request(data: dict):
+@app.post("/chat")
+async def chat(request_data: ChatRequest):
     try:
-        data["model"] = "command-r-plus"  # Add this line to use command-r-plus model
-        if data.get("stream", False):
+        data = request_data.dict()
+        data["model"] = "command-r-plus"  # Specify the model
+        if data["stream"]:
             stream = co.chat_stream(**data)
             return StreamingResponse(stream)
         else:
             response = co.chat(**data)
             return JSONResponse(content=response)
-    except CohereError as e:
-        raise e
-
-@app.post("/chat")
-async def chat(request: Request):
-    data = await validate_request(request)
-    result = await process_request(data)
-    return result
+    except ValidationError as e:
+        raise HTTPException(status_code=400, detail=str(e))
