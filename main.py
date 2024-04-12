@@ -1,21 +1,39 @@
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, HTTPException
 from fastapi.responses import JSONResponse
+from pydantic import BaseModel, ValidationError
 import os
-from cohere import Client
+import cohere
+from cohere import CohereError
 
 app = FastAPI()
 
-client = Client(api_key=os.getenv("COHERE_API_KEY"))
+class ChatRequest(BaseModel):
+    message: str
+    stream: bool = False
 
-@app.post("/command-r-plus")
-async def command_r_plus(request: Request):
-    data = await request.json()
-    text = data.get("text")
+api_key = os.getenv("COHERE_API_KEY")
+if not api_key:
+    raise EnvironmentError("COHERE_API_KEY is not set in environment variables")
+co = cohere.Client(api_key=api_key)
 
-    if not text:
-        return JSONResponse(status_code=400, content={"error": "テキスト パラメーターが指定されていません"})
+@app.exception_handler(HTTPException)
+async def http_exception_handler(request, exc: HTTPException):
+    return JSONResponse(status_code=exc.status_code, content={"error": exc.detail})
 
-    # Cohere Command R Plus を呼び出す
-    response = client.command_r_plus(text)
+@app.exception_handler(CohereError)
+async def cohere_exception_handler(request, exc: CohereError):
+    return JSONResponse(status_code=500, content={"error": "Cohere API error"})
 
-    return JSONResponse(content=response.results)
+@app.post("/chat")
+async def chat(request_data: ChatRequest):
+    try:
+        data = request_data.dict()
+        data["model"] = "command-r-plus"  # Specify the model
+        if data["stream"]:
+            stream = co.chat_stream(**data)
+            return StreamingResponse(stream)
+        else:
+            response = co.chat(**data)
+            return JSONResponse(content=response)
+    except ValidationError as e:
+        raise HTTPException(status_code=400, detail=str(e))
